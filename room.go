@@ -1,15 +1,15 @@
-package chat_server
+package simple_chat_server
 
 import "log"
 
 type Room struct {
 	Name    string
-	Queue   chan(Message)
+	Queue   chan (Message)
 	Members []User
 }
 
-func NewRoom(name string) (*Room) {
-	r := &Room {
+func NewRoom(name string) *Room {
+	r := &Room{
 		Name:    name,
 		Queue:   make(chan Message, 10),
 		Members: make([]User, 0),
@@ -29,7 +29,7 @@ func (r *Room) Join(user *User) {
 	log.Println(r.Members)
 }
 
-func (r *Room) Leave(user *User)  {
+func (r *Room) Leave(user *User) {
 	for i, mem := range r.Members {
 		if user.Id == mem.Id {
 			// remove element from slice
@@ -45,7 +45,7 @@ func (r *Room) Close() {
 
 func (r *Room) createFanout() {
 	for {
-		msg, ok := <- r.Queue
+		msg, ok := <-r.Queue
 		if ok == false {
 			return
 		}

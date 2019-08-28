@@ -1,33 +1,33 @@
-package main
+package simple_chat_server
 
 import (
 	"bufio"
+	"encoding/gob"
 	"io"
 	"log"
 	"net"
-	"strings"
 )
 
 type HandleFunc func(*bufio.ReadWriter, *net.Conn)
 
-type Endpoint struct {
+type ServerEndpoint struct {
 	listener net.Listener
-	handler map[string]HandleFunc
+	handler  map[ActionName]HandleFunc
 }
 
-func NewEndpoint() *Endpoint {
-	return &Endpoint{
-		handler:  map[string]HandleFunc{},
+func NewEndpoint() *ServerEndpoint {
+	return &ServerEndpoint{
+		handler: map[ActionName]HandleFunc{},
 	}
 }
 
-func (e *Endpoint) AddHandleFunc(name string, f HandleFunc) {
-	e.handler[name] = f
+func (e *ServerEndpoint) AddHandleFunc(a ActionName, f HandleFunc) {
+	e.handler[a] = f
 }
 
-func (e *Endpoint) Listen(port string, connFunc func(conn *net.Conn)) error {
+func (e *ServerEndpoint) Listen(port string, connFunc func(conn *net.Conn)) error {
 	var err error
-	e.listener, err = net.Listen("tcp", "localhost:" + port)
+	e.listener, err = net.Listen("tcp", "localhost:"+port)
 	if err != nil {
 		return err
 	}
@@ -45,25 +45,24 @@ func (e *Endpoint) Listen(port string, connFunc func(conn *net.Conn)) error {
 	}
 }
 
-func (e *Endpoint) handleMessages(conn *net.Conn) {
+func (e *ServerEndpoint) handleMessages(conn *net.Conn) {
 	rw := bufio.NewReadWriter(bufio.NewReader(*conn), bufio.NewWriter(*conn))
 	defer (*conn).Close()
 
 	for {
-		cmd, err := rw.ReadString('\n')
+		action := &Action{}
+		err := gob.NewDecoder(rw).Decode(action)
 		switch {
 		case err == io.EOF:
 			log.Println("Reached EOF - close this connection.\n   ---")
 			return
 		case err != nil:
-			log.Println("\nError reading command. Got: '"+cmd+"'\n", err)
+			log.Println("\nError reading command.", err)
 			return
 		}
-		cmd = strings.Trim(cmd, "\n ")
-		log.Print("Receive command " + cmd)
-		handleCommand, ok := e.handler[cmd]
+		handleCommand, ok := e.handler[action.Name]
 		if !ok {
-			log.Println("Command '" + cmd + "' is not registered.")
+			log.Println("ActionName is not registered.")
 			return
 		}
 		handleCommand(rw, conn)

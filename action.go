@@ -1,15 +1,15 @@
-package chat_server
+package simple_chat_server
 
 type Action struct {
-	cmd Command
+	Name ActionName
 }
 
-type Command int
+type ActionName int
 
 const (
-	GET_ROOMS   Command = 0
-	JOIN_ROOM   Command = 1
-	POST        Command = 2
-	LEAVE_ROOM  Command = 3
-	CREATE_ROOM Command = 4
+	GET_ROOMS   ActionName = 0
+	JOIN_ROOM   ActionName = 1
+	POST        ActionName = 2
+	LEAVE_ROOM  ActionName = 3
+	CREATE_ROOM ActionName = 4
 )
