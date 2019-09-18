@@ -3,11 +3,11 @@ package main
 import (
 	"bufio"
 	"encoding/gob"
+	scs "github.com/cpalsulich/simple-chat-server"
 	"io"
 	"log"
 	"net"
 	"os"
-	scs "simple-chat-server"
 	"strings"
 )
 
