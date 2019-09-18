@@ -1,4 +1,4 @@
-package simple_chat_server
+package chat
 
 import (
 	"bufio"
@@ -47,7 +47,10 @@ func (e *ServerEndpoint) Listen(port string, connFunc func(conn *net.Conn)) erro
 
 func (e *ServerEndpoint) handleMessages(conn *net.Conn) {
 	rw := bufio.NewReadWriter(bufio.NewReader(*conn), bufio.NewWriter(*conn))
-	defer (*conn).Close()
+	defer func() {
+		err := (*conn).Close()
+		log.Println(err)
+	}()
 
 	for {
 		action := &Action{}

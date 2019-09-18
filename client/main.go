@@ -19,24 +19,25 @@ func main() {
 	}
 	reader := bufio.NewReader(conn)
 	serverHandlers := make(map[scs.ActionName]ServerHandleFunc)
-	serverHandlers[scs.GET_ROOMS] = handleGetRooms
-	serverHandlers[scs.POST] = handleMessage
-	serverHandlers[scs.JOIN_ROOM] = handleJoinRoom
-	serverHandlers[scs.LEAVE_ROOM] = handleLeaveRoom
+	serverHandlers[scs.GetRooms] = handleGetRooms
+	serverHandlers[scs.Post] = handleMessage
+	serverHandlers[scs.JoinRoom] = handleJoinRoom
+	serverHandlers[scs.LeaveRoom] = handleLeaveRoom
 	state := &State{state: INIT}
 
 	go handleServerInput(reader, serverHandlers, state)
 	rw := bufio.NewReadWriter(bufio.NewReader(os.Stdin), bufio.NewWriter(conn))
 
-	userHandlers := make(map[ClientState]map[string]UserHandleFunc)
-	initHandlers := make(map[string]UserHandleFunc)
-	initHandlers["create"] = createRoom
-	initHandlers["join"] = joinRoom
-	inRoomHandlers := make(map[string]UserHandleFunc)
-	inRoomHandlers["post"] = post(state)
-	inRoomHandlers["leave"] = leaveRoom
-	userHandlers[INIT] = initHandlers
-	userHandlers[IN_ROOM] = inRoomHandlers
+	userHandlers := map[ClientState]map[string]UserHandleFunc{
+		INIT: {
+			"create": createRoom,
+			"join":   joinRoom,
+		},
+		IN_ROOM: {
+			"post":  post(state),
+			"leave": leaveRoom,
+		},
+	}
 
 	loop(rw, state, userHandlers)
 }
@@ -59,21 +60,21 @@ type UserHandleFunc func(*bufio.Writer, string)
 func handleServerInput(reader *bufio.Reader, handlers map[scs.ActionName]ServerHandleFunc, state *State) {
 	for {
 		action := &scs.Action{}
-		err := gob.NewDecoder(reader).Decode(action)
-		switch {
-		case err == io.EOF:
-			log.Println("Reached EOF - close this connection.\n   ---")
-			return
-		case err != nil:
-			log.Println("\nError reading command.", err)
+		if err := gob.NewDecoder(reader).Decode(action); err != nil {
+			if err == io.EOF {
+				log.Println("Reached EOF - close this connection.\n   ---")
+			} else {
+				log.Println("\nError reading command.", err)
+			}
 			return
 		}
+
 		handlerFunc := handlers[action.Name]
-		if handlerFunc != nil {
-			handlerFunc(reader, state)
-		} else {
+		if handlerFunc == nil {
 			log.Println("Unidentified command")
+			continue
 		}
+		handlerFunc(reader, state)
 	}
 }
 
@@ -106,15 +107,16 @@ func handleUserInput(rw *bufio.ReadWriter, handlers map[string]UserHandleFunc) {
 	if len(cmds) < 2 || handlerFunc == nil {
 		log.Println("invalid input: " + input)
 		log.Println(cmds[0])
-	} else {
-		handlerFunc(rw.Writer, cmds[1])
+		return
 	}
+
+	handlerFunc(rw.Writer, cmds[1])
 }
 
-func handleGetRooms(reader *bufio.Reader, state *State) {
+func handleGetRooms(reader *bufio.Reader, _ *State) {
 	rooms := make([]string, 10)
-	err := gob.NewDecoder(reader).Decode(&rooms)
-	if err != nil {
+
+	if err := gob.NewDecoder(reader).Decode(&rooms); err != nil {
 		log.Print(err)
 		return
 	}
@@ -126,10 +128,9 @@ func handleGetRooms(reader *bufio.Reader, state *State) {
 	}
 }
 
-func handleMessage(reader *bufio.Reader, state *State) {
+func handleMessage(reader *bufio.Reader, _ *State) {
 	msg := &scs.Message{}
-	err := gob.NewDecoder(reader).Decode(msg)
-	if err != nil {
+	if err := gob.NewDecoder(reader).Decode(msg); err != nil {
 		log.Println("failed to decode message")
 	} else {
 		log.Printf("%s %s %s", msg.Room, msg.Author, msg.Message)
@@ -138,20 +139,18 @@ func handleMessage(reader *bufio.Reader, state *State) {
 
 func handleJoinRoom(reader *bufio.Reader, state *State) {
 	room := &scs.Room{}
-	err := gob.NewDecoder(reader).Decode(room)
-	if err != nil {
+	if err := gob.NewDecoder(reader).Decode(room); err != nil {
 		log.Println("failed to decode room")
-	} else {
-		log.Println("joined room " + room.Name)
+		return
 	}
+	log.Println("joined room " + room.Name)
 	state.state = IN_ROOM
 	state.room = *room
 }
 
 func handleLeaveRoom(reader *bufio.Reader, state *State) {
 	room := &scs.Room{}
-	err := gob.NewDecoder(reader).Decode(room)
-	if err != nil {
+	if err := gob.NewDecoder(reader).Decode(room); err != nil {
 		log.Println("failed to decode room")
 	} else {
 		log.Println("left room " + room.Name)
@@ -160,41 +159,39 @@ func handleLeaveRoom(reader *bufio.Reader, state *State) {
 }
 
 func getRooms(w *bufio.Writer) {
-	sendRequest(w, scs.GET_ROOMS, nil)
+	sendRequest(w, scs.GetRooms, nil)
 }
 
 func joinRoom(w *bufio.Writer, name string) {
-	sendRequest(w, scs.JOIN_ROOM, scs.Room{Name: name})
+	sendRequest(w, scs.JoinRoom, scs.Room{Name: name})
 }
 
 func leaveRoom(w *bufio.Writer, name string) {
-	sendRequest(w, scs.LEAVE_ROOM, scs.Room{Name: name})
+	sendRequest(w, scs.LeaveRoom, scs.Room{Name: name})
 }
 
 func post(s *State) UserHandleFunc {
 	return func(w *bufio.Writer, msg string) {
-		sendRequest(w, scs.POST, scs.Message{Message: msg, Room: s.room.Name})
+		sendRequest(w, scs.Post, scs.Message{Message: msg, Room: s.room.Name})
 	}
 }
 
 func createRoom(w *bufio.Writer, name string) {
-	sendRequest(w, scs.CREATE_ROOM, scs.Room{Name: name})
+	sendRequest(w, scs.CreateRoom, scs.Room{Name: name})
 }
 
 func sendRequest(writer *bufio.Writer, actionName scs.ActionName, o interface{}) {
 	action := &scs.Action{Name: actionName}
-	err := gob.NewEncoder(writer).Encode(action)
-	if err != nil {
+	encoder := gob.NewEncoder(writer)
+	if err := encoder.Encode(action); err != nil {
 		log.Println("problem writing command")
 	}
 	if o != nil {
-		err = gob.NewEncoder(writer).Encode(o)
-		if err != nil {
+		if err := encoder.Encode(o); err != nil {
 			log.Println("problem encoding object for command")
 		}
 	}
-	err = writer.Flush()
-	if err != nil {
+	if err := writer.Flush(); err != nil {
 		log.Println("error flushing for command")
 	}
 }

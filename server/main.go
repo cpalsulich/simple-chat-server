@@ -11,158 +11,143 @@ import (
 func main() {
 	clients := make(map[string]*scs.User)
 	rooms := make(map[string]*scs.Room)
-	err := server(clients, rooms)
 
-	if err != nil {
+	if err := startServer(clients, rooms); err != nil {
 		panic(err)
 	}
 }
 
-func server(users map[string]*scs.User, rooms map[string]*scs.Room) error {
+func startServer(users map[string]*scs.User, rooms map[string]*scs.Room) error {
+	server := server{
+		rooms,
+		users,
+	}
 	endpoint := scs.NewEndpoint()
-	endpoint.AddHandleFunc(scs.GET_ROOMS, handleGetRooms(rooms))
-	endpoint.AddHandleFunc(scs.JOIN_ROOM, handleJoinRoom(rooms, users))
-	endpoint.AddHandleFunc(scs.POST, handlePost(rooms))
-	endpoint.AddHandleFunc(scs.LEAVE_ROOM, handleLeaveRoom(rooms, users))
-	endpoint.AddHandleFunc(scs.CREATE_ROOM, handleCreateRoom(rooms))
-	return endpoint.Listen("5001", handleConnect(users))
+	endpoint.AddHandleFunc(scs.GetRooms, server.handleGetRooms)
+	endpoint.AddHandleFunc(scs.JoinRoom, server.handleJoinRoom)
+	endpoint.AddHandleFunc(scs.Post, server.handlePost)
+	endpoint.AddHandleFunc(scs.LeaveRoom, server.handleLeaveRoom)
+	endpoint.AddHandleFunc(scs.CreateRoom, server.handleCreateRoom)
+	return endpoint.Listen("5001", server.handleConnect)
 }
 
-func handleConnect(users map[string]*scs.User) func(conn *net.Conn) {
-	return func(conn *net.Conn) {
-		user := scs.NewUser(conn)
-		log.Printf("user connected %s", user)
-		users[user.Id] = user
+type server struct {
+	rooms map[string]*scs.Room
+	users map[string]*scs.User
+}
+
+func (s *server) handleConnect(conn *net.Conn) {
+	user := scs.NewUser(conn)
+	log.Printf("user connected %s", user)
+	s.users[user.ID] = user
+}
+
+func (s *server) handleGetRooms(rw *bufio.ReadWriter, conn *net.Conn) {
+	keys := make([]string, len(s.rooms))
+	i := 0
+	for k := range s.rooms {
+		keys[i] = k
+		i++
+	}
+
+	log.Println("sending get rooms response")
+	enc := gob.NewEncoder(rw)
+
+	if err := enc.Encode(scs.Action{Name: scs.GetRooms}); err != nil {
+		log.Print(err)
+	}
+
+	if err := enc.Encode(keys); err != nil {
+		log.Print(err)
+	}
+
+	if err := rw.Flush(); err != nil {
+		log.Print(err)
 	}
 }
 
-func handleGetRooms(rooms map[string]*scs.Room) func(*bufio.ReadWriter, *net.Conn) {
-	return func(rw *bufio.ReadWriter, conn *net.Conn) {
-		keys := make([]string, len(rooms))
-		i := 0
-		for k := range rooms {
-			keys[i] = k
-			i++
-		}
+func (s *server) handleJoinRoom(rw *bufio.ReadWriter, conn *net.Conn) {
+	r := &scs.Room{}
 
-		log.Println("sending get rooms response")
-		enc := gob.NewEncoder(rw)
+	if err := gob.NewDecoder(rw).Decode(r); err != nil {
+		log.Print(err)
+	}
 
-		err := enc.Encode(scs.Action{Name: scs.GET_ROOMS})
-		if err != nil {
-			log.Print(err)
-		}
+	room := s.rooms[r.Name]
+	if room == nil {
+		log.Println("joining non-existent room " + r.Name)
+		return
+	}
+	u := scs.NewUser(conn)
+	log.Printf("user %s joining room %s", u, r)
+	room.Join(s.users[u.ID])
+	enc := gob.NewEncoder(rw)
 
-		err = enc.Encode(keys)
-		if err != nil {
-			log.Print(err)
-		}
+	if err := enc.Encode(scs.Action{Name: scs.JoinRoom}); err != nil {
+		log.Print(err)
+	}
 
-		err = rw.Flush()
-		if err != nil {
-			log.Print(err)
-		}
+	if err := enc.Encode(r); err != nil {
+		log.Printf("failed to encode room: %s", err)
+	}
+
+	if err := rw.Flush(); err != nil {
+		log.Print(err)
 	}
 }
 
-func handleJoinRoom(rooms map[string]*scs.Room, users map[string]*scs.User) func(*bufio.ReadWriter, *net.Conn) {
-	return func(rw *bufio.ReadWriter, conn *net.Conn) {
-		r := &scs.Room{}
-		err := gob.NewDecoder(rw).Decode(r)
-		if err != nil {
-			log.Print(err)
-		}
+func (s *server) handlePost(rw *bufio.ReadWriter, conn *net.Conn) {
+	msg := &scs.Message{}
 
-		room := rooms[r.Name]
-		if room == nil {
-			log.Println("joining non-existent room " + r.Name)
-			return
-		}
-		u := scs.NewUser(conn)
+	if err := gob.NewDecoder(rw).Decode(msg); err != nil {
+		log.Print(err)
+	}
 
-		log.Printf("user %s joining room %s", u, r)
+	r := s.rooms[msg.Room]
+	if r == nil {
+		log.Printf("couldn't find room (%s) for post\n", msg.Room)
+		return
+	}
+	msg.Author = scs.NewUser(conn).ID
+	r.Post(msg)
+	log.Printf("post message %s to room %s", msg.Message, msg.Room)
+}
 
-		room.Join(users[u.Id])
+func (s *server) handleLeaveRoom(rw *bufio.ReadWriter, conn *net.Conn) {
+	r := &scs.Room{}
+	if err := gob.NewDecoder(rw).Decode(r); err != nil {
+		log.Print(err)
+		return
+	}
 
-		enc := gob.NewEncoder(rw)
+	room := s.rooms[r.Name]
+	c := scs.NewUser(conn)
+	room.Leave(s.users[c.ID])
+	enc := gob.NewEncoder(rw)
 
-		err = enc.Encode(scs.Action{Name: scs.JOIN_ROOM})
-		if err != nil {
-			log.Print(err)
-		}
+	if err := enc.Encode(scs.Action{Name: scs.LeaveRoom}); err != nil {
+		log.Print(err)
+		return
+	}
 
-		err = enc.Encode(r)
-		if err != nil {
-			log.Printf("failed to encode room: %s", err)
-		}
-		err = rw.Flush()
-		if err != nil {
-			log.Print(err)
-		}
+	if err := enc.Encode(room); err != nil {
+		log.Print(err)
+		return
+	}
+
+	if err := rw.Flush(); err != nil {
+		log.Print(err)
 	}
 }
 
-func handlePost(rooms map[string]*scs.Room) func(*bufio.ReadWriter, *net.Conn) {
-	return func(rw *bufio.ReadWriter, conn *net.Conn) {
-		msg := &scs.Message{}
-		err := gob.NewDecoder(rw).Decode(msg)
-		if err != nil {
-			log.Print(err)
-		}
-
-		r := rooms[msg.Room]
-		msg.Author = scs.NewUser(conn).Id
-		if r != nil {
-			log.Printf("post message %s to room %s", msg.Message, msg.Room)
-			r.Post(msg)
-		} else {
-			log.Printf("couldn't find room (%s) for post\n", msg.Room)
-		}
-
+func (s *server) handleCreateRoom(rw *bufio.ReadWriter, conn *net.Conn) {
+	log.Println("new room")
+	r := &scs.Room{}
+	err := gob.NewDecoder(rw).Decode(r)
+	if err != nil {
+		log.Print(err)
 	}
-}
 
-func handleLeaveRoom(rooms map[string]*scs.Room, users map[string]*scs.User) func(*bufio.ReadWriter, *net.Conn) {
-	return func(rw *bufio.ReadWriter, conn *net.Conn) {
-		r := &scs.Room{}
-		err := gob.NewDecoder(rw).Decode(r)
-		if err != nil {
-			log.Print(err)
-		}
-
-		room := rooms[r.Name]
-		c := scs.NewUser(conn)
-
-		room.Leave(users[c.Id])
-
-		enc := gob.NewEncoder(rw)
-
-		err = enc.Encode(scs.Action{Name: scs.LEAVE_ROOM})
-		if err != nil {
-			log.Print(err)
-		}
-
-		err = enc.Encode(room)
-		if err != nil {
-			log.Print(err)
-		}
-		err = rw.Flush()
-		if err != nil {
-			log.Print(err)
-		}
-	}
-}
-
-func handleCreateRoom(rooms map[string]*scs.Room) func(*bufio.ReadWriter, *net.Conn) {
-	return func(rw *bufio.ReadWriter, conn *net.Conn) {
-		log.Println("new room")
-		r := &scs.Room{}
-		err := gob.NewDecoder(rw).Decode(r)
-		if err != nil {
-			log.Print(err)
-		}
-
-		log.Println("room name " + r.Name)
-		rooms[r.Name] = scs.NewRoom(r.Name)
-	}
+	log.Println("room name " + r.Name)
+	s.rooms[r.Name] = scs.NewRoom(r.Name)
 }

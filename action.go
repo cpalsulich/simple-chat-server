@@ -1,4 +1,4 @@
-package simple_chat_server
+package chat
 
 type Action struct {
 	Name ActionName
@@ -7,9 +7,9 @@ type Action struct {
 type ActionName int
 
 const (
-	GET_ROOMS   ActionName = 0
-	JOIN_ROOM   ActionName = 1
-	POST        ActionName = 2
-	LEAVE_ROOM  ActionName = 3
-	CREATE_ROOM ActionName = 4
+	GetRooms   ActionName = 0
+	JoinRoom   ActionName = 1
+	Post       ActionName = 2
+	LeaveRoom  ActionName = 3
+	CreateRoom ActionName = 4
 )

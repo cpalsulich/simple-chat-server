@@ -1,4 +1,4 @@
-package simple_chat_server
+package chat
 
 type Message struct {
 	Room    string

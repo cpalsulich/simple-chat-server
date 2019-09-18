@@ -1,4 +1,4 @@
-package simple_chat_server
+package chat
 
 import (
 	"bufio"
@@ -8,7 +8,7 @@ import (
 )
 
 type User struct {
-	Id    string
+	ID    string
 	Queue chan (Message)
 	Conn  *net.Conn
 }
@@ -16,7 +16,7 @@ type User struct {
 func NewUser(conn *net.Conn) *User {
 
 	user := &User{
-		Id:    (*conn).RemoteAddr().String(),
+		ID:    (*conn).RemoteAddr().String(),
 		Queue: make(chan Message, 10),
 		Conn:  conn,
 	}
@@ -32,9 +32,9 @@ func (u *User) createClientConsumer() {
 			return
 		}
 
-		log.Printf("receiving message %s in user %s queue", msg.Message, u.Id)
+		log.Printf("receiving message %s in user %s queue", msg.Message, u.ID)
 
-		err := gob.NewEncoder(writer).Encode(Action{Name: POST})
+		err := gob.NewEncoder(writer).Encode(Action{Name: Post})
 		if err != nil {
 			log.Print(err)
 		}
