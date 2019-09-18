@@ -3,9 +3,9 @@ package main
 import (
 	"bufio"
 	"encoding/gob"
+	scs "github.com/cpalsulich/simple-chat-server"
 	"log"
 	"net"
-	scs "simple-chat-server"
 )
 
 func main() {
