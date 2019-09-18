@@ -17,11 +17,23 @@ func main() {
 	}
 }
 
+type server struct {
+	rooms      map[string]*scs.Room
+	users      map[string]*scs.User
+	creating   chan scs.Room
+	connecting chan scs.User
+}
+
 func startServer(users map[string]*scs.User, rooms map[string]*scs.Room) error {
 	server := server{
-		rooms,
-		users,
+		rooms:      rooms,
+		users:      users,
+		creating:   make(chan scs.Room, 10),
+		connecting: make(chan scs.User, 10),
 	}
+	go server.consumeCreating()
+	go server.consumeConnecting()
+
 	endpoint := scs.NewEndpoint()
 	endpoint.AddHandleFunc(scs.GetRooms, server.handleGetRooms)
 	endpoint.AddHandleFunc(scs.JoinRoom, server.handleJoinRoom)
@@ -31,15 +43,32 @@ func startServer(users map[string]*scs.User, rooms map[string]*scs.Room) error {
 	return endpoint.Listen("5001", server.handleConnect)
 }
 
-type server struct {
-	rooms map[string]*scs.Room
-	users map[string]*scs.User
+func (s *server) consumeCreating() {
+	for {
+		r, ok := <-s.creating
+		if ok == false {
+			return
+		}
+		log.Println("new room")
+		log.Println("room name " + r.Name)
+		s.rooms[r.Name] = scs.NewRoom(r.Name)
+	}
+}
+
+func (s *server) consumeConnecting() {
+	for {
+		u, ok := <-s.connecting
+		if ok == false {
+			return
+		}
+		log.Printf("user connected %s", u)
+		s.users[u.ID] = &u
+	}
 }
 
 func (s *server) handleConnect(conn *net.Conn) {
 	user := scs.NewUser(conn)
-	log.Printf("user connected %s", user)
-	s.users[user.ID] = user
+	s.connecting <- *user
 }
 
 func (s *server) handleGetRooms(rw *bufio.ReadWriter, conn *net.Conn) {
@@ -141,13 +170,10 @@ func (s *server) handleLeaveRoom(rw *bufio.ReadWriter, conn *net.Conn) {
 }
 
 func (s *server) handleCreateRoom(rw *bufio.ReadWriter, conn *net.Conn) {
-	log.Println("new room")
 	r := &scs.Room{}
-	err := gob.NewDecoder(rw).Decode(r)
-	if err != nil {
+	if err := gob.NewDecoder(rw).Decode(r); err != nil {
 		log.Print(err)
+		return
 	}
-
-	log.Println("room name " + r.Name)
-	s.rooms[r.Name] = scs.NewRoom(r.Name)
+	s.creating <- *r
 }
