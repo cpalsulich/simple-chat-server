@@ -34,19 +34,18 @@ func (u *User) createClientConsumer() {
 
 		log.Printf("receiving message %s in user %s queue", msg.Message, u.ID)
 
-		err := gob.NewEncoder(writer).Encode(Action{Name: Post})
-		if err != nil {
-			log.Print(err)
+		if err := gob.NewEncoder(writer).Encode(Action{Name: Post}); err != nil {
+			LogError("error encoding action: %w", err)
+			return
 		}
 
-		err = gob.NewEncoder(writer).Encode(msg)
-		if err != nil {
-			log.Print(err)
+		if err := gob.NewEncoder(writer).Encode(msg); err != nil {
+			LogError("error encoding message: %w", err)
+			return
 		}
 
-		err = writer.Flush()
-		if err != nil {
-			log.Print(err)
+		if err := writer.Flush(); err != nil {
+			LogError("error flushing: %w", err)
 		}
 	}
 }

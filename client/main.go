@@ -67,13 +67,13 @@ func handleServerInput(reader *bufio.Reader, handlers map[chat.ActionName]Server
 				log.Println("Reached EOF - close this connection.\n   ---")
 				return
 			}
-			log.Printf("Error reading command: %v", err)
+			chat.LogError("Error reading command: %w", err)
 			return
 		}
 
 		handlerFunc, ok := handlers[action.Name]
 		if !ok {
-			log.Println("Unidentified command")
+			log.Printf("Unidentified command: %s", action.Name)
 			continue
 		}
 		handlerFunc(reader, state)
@@ -100,7 +100,7 @@ func handleUserInput(rw *bufio.ReadWriter, handlers map[string]UserHandleFunc) {
 	input, err := rw.ReadString('\n')
 	input = strings.TrimSpace(input)
 	if err != nil {
-		log.Println("failed to get command")
+		chat.LogError("failed to get command: %w", err)
 	}
 
 	cmds := strings.SplitN(input, " ", 2)
@@ -119,7 +119,7 @@ func handleGetRooms(reader *bufio.Reader, _ *State) {
 	var rooms []string
 
 	if err := gob.NewDecoder(reader).Decode(&rooms); err != nil {
-		log.Print(err)
+		chat.LogError("failed to decode rooms: %w", err)
 		return
 	}
 
@@ -133,16 +133,16 @@ func handleGetRooms(reader *bufio.Reader, _ *State) {
 func handleMessage(reader *bufio.Reader, _ *State) {
 	msg := &chat.Message{}
 	if err := gob.NewDecoder(reader).Decode(msg); err != nil {
-		log.Println("failed to decode message")
-	} else {
-		log.Printf("%s %s %s", msg.Room, msg.Author, msg.Message)
+		chat.LogError("failed to decode message: %w", err)
+		return
 	}
+	log.Printf("%s %s %s", msg.Room, msg.Author, msg.Message)
 }
 
 func handleJoinRoom(reader *bufio.Reader, state *State) {
 	room := &chat.Room{}
 	if err := gob.NewDecoder(reader).Decode(room); err != nil {
-		log.Println("failed to decode room")
+		chat.LogError("failed to decode room: %w", err)
 		return
 	}
 	log.Println("joined room " + room.Name)
@@ -153,9 +153,9 @@ func handleJoinRoom(reader *bufio.Reader, state *State) {
 func handleLeaveRoom(reader *bufio.Reader, state *State) {
 	room := &chat.Room{}
 	if err := gob.NewDecoder(reader).Decode(room); err != nil {
-		log.Println("failed to decode room")
+		chat.LogError("failed to decode room: %w", err)
 	} else {
-		log.Println("left room " + room.Name)
+		log.Printf("left room %s", room.Name)
 	}
 	state.state = initial
 }
@@ -186,14 +186,14 @@ func sendRequest(writer *bufio.Writer, actionName chat.ActionName, o interface{}
 	action := &chat.Action{Name: actionName}
 	encoder := gob.NewEncoder(writer)
 	if err := encoder.Encode(action); err != nil {
-		log.Println("problem writing command")
+		chat.LogError("problem writing command: %w", err)
 	}
 	if o != nil {
 		if err := encoder.Encode(o); err != nil {
-			log.Println("problem encoding object for command")
+			chat.LogError("problem encoding object for command: %w", err)
 		}
 	}
 	if err := writer.Flush(); err != nil {
-		log.Println("error flushing for command")
+		chat.LogError("error flushing for command: %w", err)
 	}
 }

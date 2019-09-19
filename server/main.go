@@ -3,14 +3,14 @@ package main
 import (
 	"bufio"
 	"encoding/gob"
-	scs "github.com/cpalsulich/simple-chat-server"
+	chat "github.com/cpalsulich/simple-chat-server"
 	"log"
 	"net"
 )
 
 func main() {
-	clients := make(map[string]*scs.User)
-	rooms := make(map[string]*scs.Room)
+	clients := make(map[string]*chat.User)
+	rooms := make(map[string]*chat.Room)
 
 	if err := startServer(clients, rooms); err != nil {
 		panic(err)
@@ -18,28 +18,28 @@ func main() {
 }
 
 type server struct {
-	rooms      map[string]*scs.Room
-	users      map[string]*scs.User
-	creating   chan scs.Room
-	connecting chan scs.User
+	rooms      map[string]*chat.Room
+	users      map[string]*chat.User
+	creating   chan chat.Room
+	connecting chan chat.User
 }
 
-func startServer(users map[string]*scs.User, rooms map[string]*scs.Room) error {
+func startServer(users map[string]*chat.User, rooms map[string]*chat.Room) error {
 	server := server{
 		rooms:      rooms,
 		users:      users,
-		creating:   make(chan scs.Room, 10),
-		connecting: make(chan scs.User, 10),
+		creating:   make(chan chat.Room, 10),
+		connecting: make(chan chat.User, 10),
 	}
 	go server.consumeCreating()
 	go server.consumeConnecting()
 
-	endpoint := scs.NewEndpoint()
-	endpoint.AddHandleFunc(scs.GetRooms, server.handleGetRooms)
-	endpoint.AddHandleFunc(scs.JoinRoom, server.handleJoinRoom)
-	endpoint.AddHandleFunc(scs.Post, server.handlePost)
-	endpoint.AddHandleFunc(scs.LeaveRoom, server.handleLeaveRoom)
-	endpoint.AddHandleFunc(scs.CreateRoom, server.handleCreateRoom)
+	endpoint := chat.NewEndpoint()
+	endpoint.AddHandleFunc(chat.GetRooms, server.handleGetRooms)
+	endpoint.AddHandleFunc(chat.JoinRoom, server.handleJoinRoom)
+	endpoint.AddHandleFunc(chat.Post, server.handlePost)
+	endpoint.AddHandleFunc(chat.LeaveRoom, server.handleLeaveRoom)
+	endpoint.AddHandleFunc(chat.CreateRoom, server.handleCreateRoom)
 	return endpoint.Listen("5001", server.handleConnect)
 }
 
@@ -51,7 +51,7 @@ func (s *server) consumeCreating() {
 		}
 		log.Println("new room")
 		log.Println("room name " + r.Name)
-		s.rooms[r.Name] = scs.NewRoom(r.Name)
+		s.rooms[r.Name] = chat.NewRoom(r.Name)
 	}
 }
 
@@ -67,7 +67,7 @@ func (s *server) consumeConnecting() {
 }
 
 func (s *server) handleConnect(conn *net.Conn) {
-	user := scs.NewUser(conn)
+	user := chat.NewUser(conn)
 	s.connecting <- *user
 }
 
@@ -82,24 +82,24 @@ func (s *server) handleGetRooms(rw *bufio.ReadWriter, conn *net.Conn) {
 	log.Println("sending get rooms response")
 	enc := gob.NewEncoder(rw)
 
-	if err := enc.Encode(scs.Action{Name: scs.GetRooms}); err != nil {
-		log.Print(err)
+	if err := enc.Encode(chat.Action{Name: chat.GetRooms}); err != nil {
+		chat.LogError("failed to encode action: %w", err)
 	}
 
 	if err := enc.Encode(keys); err != nil {
-		log.Print(err)
+		chat.LogError("failed to encode keys: %w", err)
 	}
 
 	if err := rw.Flush(); err != nil {
-		log.Print(err)
+		chat.LogError("failed to flush: %w", err)
 	}
 }
 
 func (s *server) handleJoinRoom(rw *bufio.ReadWriter, conn *net.Conn) {
-	r := &scs.Room{}
+	r := &chat.Room{}
 
 	if err := gob.NewDecoder(rw).Decode(r); err != nil {
-		log.Print(err)
+		chat.LogError("failed to decode room: %w", err)
 	}
 
 	room := s.rooms[r.Name]
@@ -107,29 +107,29 @@ func (s *server) handleJoinRoom(rw *bufio.ReadWriter, conn *net.Conn) {
 		log.Println("joining non-existent room " + r.Name)
 		return
 	}
-	u := scs.NewUser(conn)
+	u := chat.NewUser(conn)
 	log.Printf("user %s joining room %s", u, r)
 	room.Join(s.users[u.ID])
 	enc := gob.NewEncoder(rw)
 
-	if err := enc.Encode(scs.Action{Name: scs.JoinRoom}); err != nil {
-		log.Print(err)
+	if err := enc.Encode(chat.Action{Name: chat.JoinRoom}); err != nil {
+		chat.LogError("failed to encode action: %w", err)
 	}
 
 	if err := enc.Encode(r); err != nil {
-		log.Printf("failed to encode room: %s", err)
+		chat.LogError("failed to encode room: %w", err)
 	}
 
 	if err := rw.Flush(); err != nil {
-		log.Print(err)
+		chat.LogError("failed to flush: %w", err)
 	}
 }
 
 func (s *server) handlePost(rw *bufio.ReadWriter, conn *net.Conn) {
-	msg := &scs.Message{}
+	msg := &chat.Message{}
 
 	if err := gob.NewDecoder(rw).Decode(msg); err != nil {
-		log.Print(err)
+		chat.LogError("failed to decode message: %w", err)
 	}
 
 	r := s.rooms[msg.Room]
@@ -137,42 +137,42 @@ func (s *server) handlePost(rw *bufio.ReadWriter, conn *net.Conn) {
 		log.Printf("couldn't find room (%s) for post\n", msg.Room)
 		return
 	}
-	msg.Author = scs.NewUser(conn).ID
+	msg.Author = chat.NewUser(conn).ID
 	r.Post(msg)
 	log.Printf("post message %s to room %s", msg.Message, msg.Room)
 }
 
 func (s *server) handleLeaveRoom(rw *bufio.ReadWriter, conn *net.Conn) {
-	r := &scs.Room{}
+	r := &chat.Room{}
 	if err := gob.NewDecoder(rw).Decode(r); err != nil {
-		log.Print(err)
+		chat.LogError("failed to decode room: %w", err)
 		return
 	}
 
 	room := s.rooms[r.Name]
-	c := scs.NewUser(conn)
+	c := chat.NewUser(conn)
 	room.Leave(s.users[c.ID])
 	enc := gob.NewEncoder(rw)
 
-	if err := enc.Encode(scs.Action{Name: scs.LeaveRoom}); err != nil {
-		log.Print(err)
+	if err := enc.Encode(chat.Action{Name: chat.LeaveRoom}); err != nil {
+		chat.LogError("failed to encode action: %w", err)
 		return
 	}
 
 	if err := enc.Encode(room); err != nil {
-		log.Print(err)
+		chat.LogError("failed to encode room: %w", err)
 		return
 	}
 
 	if err := rw.Flush(); err != nil {
-		log.Print(err)
+		chat.LogError("failed to flush: %w", err)
 	}
 }
 
 func (s *server) handleCreateRoom(rw *bufio.ReadWriter, conn *net.Conn) {
-	r := &scs.Room{}
+	r := &chat.Room{}
 	if err := gob.NewDecoder(rw).Decode(r); err != nil {
-		log.Print(err)
+		chat.LogError("failed to decode room: %w", err)
 		return
 	}
 	s.creating <- *r

@@ -3,6 +3,7 @@ package chat
 import (
 	"bufio"
 	"encoding/gob"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -36,7 +37,7 @@ func (e *ServerEndpoint) Listen(port string, connFunc func(conn *net.Conn)) erro
 		log.Println("Accept a connection request.")
 		conn, err := e.listener.Accept()
 		if err != nil {
-			log.Println("Failed accepting a connection request:", err)
+			LogError("Failed accepting a connection request: %w", err)
 			continue
 		}
 		log.Println("Handle incoming messages.")
@@ -54,13 +55,12 @@ func (e *ServerEndpoint) handleMessages(conn *net.Conn) {
 
 	for {
 		action := &Action{}
-		err := gob.NewDecoder(rw).Decode(action)
-		switch {
-		case err == io.EOF:
-			log.Println("Reached EOF - close this connection.\n   ---")
-			return
-		case err != nil:
-			log.Println("\nError reading command.", err)
+		if err := gob.NewDecoder(rw).Decode(action); err != nil {
+			if errors.Is(err, io.EOF) {
+				log.Println("Reached EOF - close this connection.\n   ---")
+				return
+			}
+			LogError("Error reading command: %w", err)
 			return
 		}
 		handleCommand, ok := e.handler[action.Name]
