@@ -196,4 +196,17 @@ func (s *server) handleCreateRoom(rw *bufio.ReadWriter, conn *net.Conn) {
 		return
 	}
 	s.creating <- *r
+
+	enc := gob.NewEncoder(rw)
+	if err := enc.Encode(chat.Action{Name: chat.CreateRoom}); err != nil {
+		chat.LogError("failed to encode action: %w", err)
+	}
+
+	if err := enc.Encode(r); err != nil {
+		chat.LogError("failed to encode room: %w", err)
+	}
+
+	if err := rw.Flush(); err != nil {
+		chat.LogError("failed to flush: %w", err)
+	}
 }

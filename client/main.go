@@ -17,18 +17,17 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	reader := bufio.NewReader(conn)
 	serverHandlers := map[chat.ActionName]ServerHandleFunc{
-		chat.GetRooms:  handleGetRooms,
-		chat.Post:      handleMessage,
-		chat.JoinRoom:  handleJoinRoom,
-		chat.LeaveRoom: handleLeaveRoom,
+		chat.GetRooms:   handleGetRooms,
+		chat.Post:       handleMessage,
+		chat.JoinRoom:   handleJoinRoom,
+		chat.LeaveRoom:  handleLeaveRoom,
+		chat.CreateRoom: handleCreateRoom,
 	}
 
 	state := &State{state: initial}
 
-	go handleServerInput(reader, serverHandlers, state)
-	rw := bufio.NewReadWriter(bufio.NewReader(os.Stdin), bufio.NewWriter(conn))
+	go handleServerInput(bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)), serverHandlers, state)
 
 	userHandlers := map[ClientState]map[string]UserHandleFunc{
 		initial: {
@@ -40,8 +39,7 @@ func main() {
 			"leave": leaveRoom,
 		},
 	}
-
-	loop(rw, state, userHandlers)
+	loop(bufio.NewReadWriter(bufio.NewReader(os.Stdin), bufio.NewWriter(conn)), state, userHandlers)
 }
 
 type State struct {
@@ -56,13 +54,14 @@ const (
 	inRoom  ClientState = 1
 )
 
-type ServerHandleFunc func(*bufio.Reader, *State)
+type ServerHandleFunc func(*bufio.Reader, func(ClientState, chat.Room))
 type UserHandleFunc func(*bufio.Writer, string)
 
-func handleServerInput(reader *bufio.Reader, handlers map[chat.ActionName]ServerHandleFunc, state *State) {
+func handleServerInput(rw *bufio.ReadWriter, handlers map[chat.ActionName]ServerHandleFunc, state *State) {
+	updateStateFunc := updateState(state, rw)
 	for {
 		action := &chat.Action{}
-		if err := gob.NewDecoder(reader).Decode(action); err != nil {
+		if err := gob.NewDecoder(rw).Decode(action); err != nil {
 			if err == io.EOF {
 				log.Println("Reached EOF - close this connection.\n   ---")
 				return
@@ -73,15 +72,19 @@ func handleServerInput(reader *bufio.Reader, handlers map[chat.ActionName]Server
 
 		handlerFunc, ok := handlers[action.Name]
 		if !ok {
-			log.Printf("Unidentified command: %s", action.Name)
+			log.Printf("Unidentified command: %v", action.Name)
 			continue
 		}
-		handlerFunc(reader, state)
+
+		handlerFunc(rw.Reader, updateStateFunc)
 	}
 }
 
-func loop(rw *bufio.ReadWriter, state *State, handlers map[ClientState]map[string]UserHandleFunc) {
-	for {
+func updateState(state *State, rw *bufio.ReadWriter) func(ClientState, chat.Room) {
+	return func(cs ClientState, r chat.Room) {
+		state.state = cs
+		state.room = r
+
 		switch state.state {
 		case initial:
 			getRooms(rw.Writer)
@@ -91,12 +94,19 @@ func loop(rw *bufio.ReadWriter, state *State, handlers map[ClientState]map[strin
 			log.Println("Leave room: 'leave <room_name>'")
 			log.Println("Post: 'post <message>'")
 		}
-
-		handleUserInput(rw, handlers[state.state])
 	}
 }
 
-func handleUserInput(rw *bufio.ReadWriter, handlers map[string]UserHandleFunc) {
+func loop(rw *bufio.ReadWriter, state *State, handlers map[ClientState]map[string]UserHandleFunc) {
+	getRooms(rw.Writer)
+	log.Println("Join room: 'join <room_name>'")
+	log.Println("Create room: 'create <room_name>'")
+	for {
+		handleUserInput(rw, state, handlers)
+	}
+}
+
+func handleUserInput(rw *bufio.ReadWriter, state *State, handlers map[ClientState]map[string]UserHandleFunc) {
 	input, err := rw.ReadString('\n')
 	input = strings.TrimSpace(input)
 	if err != nil {
@@ -105,7 +115,7 @@ func handleUserInput(rw *bufio.ReadWriter, handlers map[string]UserHandleFunc) {
 
 	cmds := strings.SplitN(input, " ", 2)
 
-	handlerFunc := handlers[cmds[0]]
+	handlerFunc := handlers[state.state][cmds[0]]
 	if len(cmds) < 2 || handlerFunc == nil {
 		log.Println("invalid input: " + input)
 		log.Println(cmds[0])
@@ -115,7 +125,7 @@ func handleUserInput(rw *bufio.ReadWriter, handlers map[string]UserHandleFunc) {
 	handlerFunc(rw.Writer, cmds[1])
 }
 
-func handleGetRooms(reader *bufio.Reader, _ *State) {
+func handleGetRooms(reader *bufio.Reader, _ func(ClientState, chat.Room)) {
 	var rooms []string
 
 	if err := gob.NewDecoder(reader).Decode(&rooms); err != nil {
@@ -124,13 +134,13 @@ func handleGetRooms(reader *bufio.Reader, _ *State) {
 	}
 
 	if len(rooms) > 0 {
-		log.Printf("room list: %s\n", rooms)
+		log.Printf("room list: [%s]\n", strings.Join(rooms, ", "))
 	} else {
 		log.Println("no rooms created")
 	}
 }
 
-func handleMessage(reader *bufio.Reader, _ *State) {
+func handleMessage(reader *bufio.Reader, _ func(ClientState, chat.Room)) {
 	msg := &chat.Message{}
 	if err := gob.NewDecoder(reader).Decode(msg); err != nil {
 		chat.LogError("failed to decode message: %w", err)
@@ -139,25 +149,34 @@ func handleMessage(reader *bufio.Reader, _ *State) {
 	log.Printf("%s %s %s", msg.Room, msg.Author, msg.Message)
 }
 
-func handleJoinRoom(reader *bufio.Reader, state *State) {
+func handleJoinRoom(reader *bufio.Reader, updateState func(state ClientState, room chat.Room)) {
 	room := &chat.Room{}
 	if err := gob.NewDecoder(reader).Decode(room); err != nil {
 		chat.LogError("failed to decode room: %w", err)
 		return
 	}
 	log.Println("joined room " + room.Name)
-	state.state = inRoom
-	state.room = *room
+	updateState(inRoom, *room)
 }
 
-func handleLeaveRoom(reader *bufio.Reader, state *State) {
+func handleLeaveRoom(reader *bufio.Reader, updateState func(state ClientState, room chat.Room)) {
 	room := &chat.Room{}
 	if err := gob.NewDecoder(reader).Decode(room); err != nil {
 		chat.LogError("failed to decode room: %w", err)
 	} else {
 		log.Printf("left room %s", room.Name)
 	}
-	state.state = initial
+	updateState(initial, chat.Room{})
+}
+
+func handleCreateRoom(reader *bufio.Reader, updateState func(state ClientState, room chat.Room)) {
+	room := &chat.Room{}
+	if err := gob.NewDecoder(reader).Decode(room); err != nil {
+		chat.LogError("failed to decode room: %w", err)
+	} else {
+		log.Printf("room %s created", room.Name)
+	}
+	updateState(initial, chat.Room{})
 }
 
 func getRooms(w *bufio.Writer) {
