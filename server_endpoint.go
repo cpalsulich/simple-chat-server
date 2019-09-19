@@ -26,7 +26,7 @@ func (e *ServerEndpoint) AddHandleFunc(a ActionName, f HandleFunc) {
 	e.handler[a] = f
 }
 
-func (e *ServerEndpoint) Listen(port string, connFunc func(conn *net.Conn)) error {
+func (e *ServerEndpoint) Listen(port string, connectFunc func(conn *net.Conn), disconnectFunc func(conn *net.Conn)) error {
 	var err error
 	e.listener, err = net.Listen("tcp", "localhost:"+port)
 	if err != nil {
@@ -41,23 +41,22 @@ func (e *ServerEndpoint) Listen(port string, connFunc func(conn *net.Conn)) erro
 			continue
 		}
 		log.Println("Handle incoming messages.")
-		connFunc(&conn)
-		go e.handleMessages(&conn)
+		connectFunc(&conn)
+		go e.handleMessages(&conn, disconnectFunc)
 	}
 }
 
-func (e *ServerEndpoint) handleMessages(conn *net.Conn) {
+func (e *ServerEndpoint) handleMessages(conn *net.Conn, disconnectFunc func(conn *net.Conn)) {
 	rw := bufio.NewReadWriter(bufio.NewReader(*conn), bufio.NewWriter(*conn))
 	defer func() {
-		err := (*conn).Close()
-		log.Println(err)
+		disconnectFunc(conn)
+		(*conn).Close()
 	}()
 
 	for {
 		action := &Action{}
 		if err := gob.NewDecoder(rw).Decode(action); err != nil {
 			if errors.Is(err, io.EOF) {
-				log.Println("Reached EOF - close this connection.\n   ---")
 				return
 			}
 			LogError("Error reading command: %w", err)

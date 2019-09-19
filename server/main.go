@@ -18,21 +18,24 @@ func main() {
 }
 
 type server struct {
-	rooms      map[string]*chat.Room
-	users      map[string]*chat.User
-	creating   chan chat.Room
-	connecting chan chat.User
+	rooms         map[string]*chat.Room
+	users         map[string]*chat.User
+	creating      chan chat.Room
+	connecting    chan chat.User
+	disconnecting chan chat.User
 }
 
 func startServer(users map[string]*chat.User, rooms map[string]*chat.Room) error {
 	server := server{
-		rooms:      rooms,
-		users:      users,
-		creating:   make(chan chat.Room, 10),
-		connecting: make(chan chat.User, 10),
+		rooms:         rooms,
+		users:         users,
+		creating:      make(chan chat.Room, 10),
+		connecting:    make(chan chat.User, 10),
+		disconnecting: make(chan chat.User, 10),
 	}
 	go server.consumeCreating()
 	go server.consumeConnecting()
+	go server.consumeDisconnecting()
 
 	endpoint := chat.NewEndpoint()
 	endpoint.AddHandleFunc(chat.GetRooms, server.handleGetRooms)
@@ -40,7 +43,7 @@ func startServer(users map[string]*chat.User, rooms map[string]*chat.Room) error
 	endpoint.AddHandleFunc(chat.Post, server.handlePost)
 	endpoint.AddHandleFunc(chat.LeaveRoom, server.handleLeaveRoom)
 	endpoint.AddHandleFunc(chat.CreateRoom, server.handleCreateRoom)
-	return endpoint.Listen("5001", server.handleConnect)
+	return endpoint.Listen("5001", server.handleConnect, server.handleDisconnect)
 }
 
 func (s *server) consumeCreating() {
@@ -61,14 +64,31 @@ func (s *server) consumeConnecting() {
 		if ok == false {
 			return
 		}
-		log.Printf("user connected %s", u)
+		log.Printf("user connected %v", u)
 		s.users[u.ID] = &u
+	}
+}
+
+func (s *server) consumeDisconnecting() {
+	for {
+		u, ok := <-s.disconnecting
+		if ok == false {
+			return
+		}
+		log.Printf("user disconnected %v", u)
+		delete(s.users, u.ID)
+		log.Printf("num users: %d", len(s.users))
 	}
 }
 
 func (s *server) handleConnect(conn *net.Conn) {
 	user := chat.NewUser(conn)
 	s.connecting <- *user
+}
+
+func (s *server) handleDisconnect(conn *net.Conn) {
+	user := chat.NewUser(conn)
+	s.disconnecting <- *user
 }
 
 func (s *server) handleGetRooms(rw *bufio.ReadWriter, conn *net.Conn) {
