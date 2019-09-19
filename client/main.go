@@ -114,7 +114,7 @@ func handleUserInput(rw *bufio.ReadWriter, handlers map[string]UserHandleFunc) {
 }
 
 func handleGetRooms(reader *bufio.Reader, _ *State) {
-	rooms := make([]string, 10)
+	var rooms []string
 
 	if err := gob.NewDecoder(reader).Decode(&rooms); err != nil {
 		log.Print(err)

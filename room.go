@@ -48,6 +48,7 @@ func (r *Room) consumeMessages() {
 			return
 		}
 
+		log.Printf("room %s members size %d", r.Name, len(r.Members))
 		for _, mem := range r.Members {
 			log.Printf("adding message %s in room %s for user %s", msg.Message, msg.Room, mem)
 			mem.Queue <- msg
@@ -69,7 +70,7 @@ func (r *Room) consumeJoiners() {
 
 func (r *Room) consumeLeavers() {
 	for {
-		user, ok := <-r.joining
+		user, ok := <-r.leaving
 		if ok == false {
 			return
 		}
