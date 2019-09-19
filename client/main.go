@@ -39,7 +39,7 @@ func main() {
 			"leave": leaveRoom,
 		},
 	}
-	loop(bufio.NewReadWriter(bufio.NewReader(os.Stdin), bufio.NewWriter(conn)), state, userHandlers)
+	acceptUserInput(bufio.NewReadWriter(bufio.NewReader(os.Stdin), bufio.NewWriter(conn)), state, userHandlers)
 }
 
 type State struct {
@@ -97,7 +97,7 @@ func updateState(state *State, rw *bufio.ReadWriter) func(ClientState, chat.Room
 	}
 }
 
-func loop(rw *bufio.ReadWriter, state *State, handlers map[ClientState]map[string]UserHandleFunc) {
+func acceptUserInput(rw *bufio.ReadWriter, state *State, handlers map[ClientState]map[string]UserHandleFunc) {
 	getRooms(rw.Writer)
 	log.Println("Join room: 'join <room_name>'")
 	log.Println("Create room: 'create <room_name>'")
